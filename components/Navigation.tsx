@@ -22,7 +22,7 @@ export default function Navigation({ userRole, userName, onLogout }: NavigationP
     { path: '/timesheets', label: 'My Timesheets', icon: Clock, show: true },
     { path: '/timesheets/new', label: 'New Timesheet', icon: FileText, show: true },
     { path: '/approvals', label: 'Approvals', icon: CheckCircle, show: canAccessApprovals },
-    { path: '/preapproval', label: 'Preapproval', icon: FileText, show: canAccessApprovals },
+    { path: '/preapproval', label: 'Preapproval', icon: FileText, show: true },
     { path: '/admin', label: 'Admin Panel', icon: Shield, show: isAdmin },
   ];
 

@@ -162,25 +162,23 @@ export default function LandingPage() {
             </motion.div>
           )}
 
-          {/* Preapproval Card - Only visible to managers */}
-          {canAccessApprovals && (
-            <motion.div
-              whileHover={{ y: -8, scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="group cursor-pointer"
-              onClick={() => router.push('/preapproval')}
-            >
-              <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-8 text-white shadow-xl hover:shadow-2xl transition-all duration-300">
-                <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
-                  <FileText className="w-8 h-8" />
-                </div>
-                <h3 className="text-2xl font-bold mb-3">Preapproval</h3>
-                <p className="text-orange-100 text-lg">
-                  View all timesheets with approval history and filters
-                </p>
+          {/* Preapproval Card - Visible to all users */}
+          <motion.div
+            whileHover={{ y: -8, scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="group cursor-pointer"
+            onClick={() => router.push('/preapproval')}
+          >
+            <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl p-8 text-white shadow-xl hover:shadow-2xl transition-all duration-300">
+              <div className="w-16 h-16 bg-white/20 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform duration-300">
+                <FileText className="w-8 h-8" />
               </div>
-            </motion.div>
-          )}
+              <h3 className="text-2xl font-bold mb-3">Preapproval</h3>
+                              <p className="text-orange-100 text-lg">
+                  View timesheets and track approval status
+                </p>
+            </div>
+          </motion.div>
 
           {/* Admin Panel Card - Only visible to admins */}
           {user.role === 'ADMIN' && (

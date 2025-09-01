@@ -19,13 +19,8 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Check if user has approval access
-    if (!['PM', 'FM', 'ADMIN'].includes(userRole)) {
-      return NextResponse.json(
-        { error: 'Access denied' },
-        { status: 403 }
-      );
-    }
+    // All authenticated users can access this endpoint
+    // Role-based filtering will be applied in the query logic below
 
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status');
@@ -55,6 +50,9 @@ export async function GET(request: NextRequest) {
       const directReports = await User.find({ functionalManagerId: userId });
       const employeeIds = directReports.map(u => u._id);
       query.employeeId = { $in: employeeIds };
+    } else if (userRole === 'EMPLOYEE') {
+      // Employees can see their own timesheets
+      query.employeeId = userId;
     }
 
     // Fetch timesheets with populated data
