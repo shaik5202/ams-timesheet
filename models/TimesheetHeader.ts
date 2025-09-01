@@ -4,7 +4,7 @@ export interface ITimesheetHeader extends Document {
   employeeId: mongoose.Types.ObjectId;
   weekStart: Date;
   weekEnd: Date;
-  status: 'Pending' | 'Submitted' | 'Approved' | 'Rejected';
+  status: 'Pending' | 'Submitted' | 'PM_Approved' | 'Approved' | 'Rejected';
   submittedOn?: Date;
   totalHours: number;
   pmId?: mongoose.Types.ObjectId;
@@ -33,7 +33,7 @@ const TimesheetHeaderSchema = new Schema<ITimesheetHeader>({
   },
   status: {
     type: String,
-    enum: ['Pending', 'Submitted', 'Approved', 'Rejected'],
+    enum: ['Pending', 'Submitted', 'PM_Approved', 'Approved', 'Rejected'],
     default: 'Pending',
   },
   submittedOn: {

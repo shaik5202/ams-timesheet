@@ -2,63 +2,27 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
-import { 
-  Eye, 
-  CheckCircle, 
-  XCircle, 
-  Filter, 
-  Download, 
-  FileText, 
-  Calendar,
-  Clock,
-  User,
-  FolderOpen,
-  Search,
-  RefreshCw
-} from 'lucide-react';
-import { Button } from '../../components/ui/button';
-import { Badge } from '../../components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { Input } from '../../components/ui/input';
-import { useToast } from '../../hooks/use-toast';
+import { ArrowLeft, Plus, Trash2, Save, Send, Calendar } from 'lucide-react';
 import Navigation from '../../components/Navigation';
 
-interface Timesheet {
+interface Project {
   _id: string;
-  weekStart: string;
-  weekEnd: string;
-  status: 'Pending' | 'Submitted' | 'Approved' | 'Rejected';
-  totalHours: number;
-  submittedOn?: string;
-  employeeId: {
-    _id: string;
-    name: string;
-    email: string;
-  };
-  pmId?: {
-    _id: string;
-    name: string;
-    email: string;
-  };
-  fmId?: {
-    _id: string;
-    name: string;
-    email: string;
-  };
-  pmDecision?: 'Approved' | 'Rejected';
-  pmComment?: string;
-  fmDecision?: 'Approved' | 'Rejected';
-  fmComment?: string;
-  lines?: Array<{
-    projectId: {
-      _id: string;
-      name: string;
-      code: string;
-    };
-    hours: number;
-    description: string;
-  }>;
+  name: string;
+  code: string;
+}
+
+interface TimesheetLine {
+  _id?: string;
+  projectId: string;
+  sat: number;
+  sun: number;
+  mon: number;
+  tue: number;
+  wed: number;
+  thu: number;
+  fri: number;
+  lineTotal: number;
+  comment?: string;
 }
 
 interface User {
@@ -70,20 +34,20 @@ interface User {
 
 export default function PreapprovalPage() {
   const [user, setUser] = useState<User | null>(null);
-  const [timesheets, setTimesheets] = useState<Timesheet[]>([]);
-  const [filteredTimesheets, setFilteredTimesheets] = useState<Timesheet[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [selectedWeek, setSelectedWeek] = useState<'current' | 'last'>('current');
+  const [lines, setLines] = useState<TimesheetLine[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('Pending');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-  const [dateFilter, setDateFilter] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const router = useRouter();
-  const { toast } = useToast();
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const response = await fetch('/api/approvals');
+        const response = await fetch('/api/timesheets');
         if (response.ok) {
           const userId = response.headers.get('x-user-id');
           const userName = response.headers.get('x-user-name');
@@ -106,222 +70,224 @@ export default function PreapprovalPage() {
       }
     };
 
+    const fetchProjects = async () => {
+      try {
+        const response = await fetch('/api/projects');
+        if (response.ok) {
+          const data = await response.json();
+          setProjects(data.projects);
+        }
+      } catch (error) {
+        console.error('Failed to fetch projects:', error);
+      }
+    };
+
     checkAuth();
+    fetchProjects();
+    setIsLoading(false);
   }, [router]);
 
-  useEffect(() => {
-    if (user) {
-      fetchTimesheets();
+  const getWeekDates = (weekType: 'current' | 'last') => {
+    const now = new Date();
+    const currentWeekStart = getWeekStart(now);
+    
+    if (weekType === 'current') {
+      return {
+        start: currentWeekStart,
+        end: new Date(currentWeekStart.getTime() + 6 * 24 * 60 * 60 * 1000)
+      };
+    } else {
+      const lastWeekStart = new Date(currentWeekStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+      return {
+        start: lastWeekStart,
+        end: new Date(lastWeekStart.getTime() + 6 * 24 * 60 * 60 * 1000)
+      };
     }
-  }, [user, activeTab]);
+  };
 
-  useEffect(() => {
-    applyFilters();
-  }, [timesheets, searchTerm, statusFilter, dateFilter]);
+  const getWeekStart = (date: Date) => {
+    const d = new Date(date);
+    const day = d.getDay();
+    // Saturday is 6, so we need to adjust the calculation
+    const diff = d.getDate() - day + (day === 6 ? 0 : day < 6 ? -6 : 1);
+    const start = new Date(d.setDate(diff));
+    // Normalize to start of day to avoid timezone mismatches
+    start.setHours(0, 0, 0, 0);
+    return start;
+  };
 
-  const fetchTimesheets = async () => {
-    try {
-      const response = await fetch(`/api/approvals?status=${activeTab}`);
-      if (response.ok) {
-        const data = await response.json();
-        setTimesheets(data.timesheets);
+  const addProjectRow = () => {
+    if (lines.length >= 10) {
+      setError('Maximum 10 project rows allowed');
+      return;
+    }
+
+    const newLine: TimesheetLine = {
+      projectId: '',
+      sat: 0,
+      sun: 0,
+      mon: 0,
+      tue: 0,
+      wed: 0,
+      thu: 0,
+      fri: 0,
+      lineTotal: 0,
+      comment: '',
+    };
+
+    setLines([...lines, newLine]);
+  };
+
+  const removeProjectRow = (index: number) => {
+    if (lines.length <= 1) {
+      setError('At least one project row is required');
+      return;
+    }
+    setLines(lines.filter((_, i) => i !== index));
+  };
+
+  const updateLine = (index: number, field: keyof TimesheetLine, value: string | number) => {
+    const newLines = [...lines];
+    newLines[index] = { ...newLines[index], [field]: value };
+    
+    // Calculate line total
+    if (['sat', 'sun', 'mon', 'tue', 'wed', 'thu', 'fri'].includes(field)) {
+      const total = newLines[index].sat + newLines[index].sun + newLines[index].mon + 
+                   newLines[index].tue + newLines[index].wed + newLines[index].thu + newLines[index].fri;
+      newLines[index].lineTotal = total;
+    }
+    
+    setLines(newLines);
+  };
+
+  const getTotalHours = () => {
+    return lines.reduce((sum, line) => sum + line.lineTotal, 0);
+  };
+
+  const getDayTotal = (day: keyof Pick<TimesheetLine, 'sat' | 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri'>) => {
+    return lines.reduce((sum, line) => sum + (line[day] || 0), 0);
+  };
+
+  const validateForm = () => {
+    if (lines.length === 0) {
+      setError('At least one project row is required');
+      return false;
+    }
+
+    for (const line of lines) {
+      if (!line.projectId) {
+        setError('All projects must be selected');
+        return false;
       }
-    } catch (error) {
-      console.error('Failed to fetch timesheets:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch timesheets',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const applyFilters = () => {
-    // Filter out timesheets with null/undefined employeeId
-    let filtered = timesheets.filter(t => t.employeeId && t.employeeId.name);
-
-    // Search filter
-    if (searchTerm) {
-      filtered = filtered.filter(t => 
-        (t.employeeId && t.employeeId.name && t.employeeId.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (t.employeeId && t.employeeId.email && t.employeeId.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (t.lines && t.lines.some(line => 
-          line.projectId && line.projectId.name && line.projectId.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          line.projectId && line.projectId.code && line.projectId.code.toLowerCase().includes(searchTerm.toLowerCase())
-        ))
-      );
     }
 
-    // Status filter
-    if (statusFilter !== 'All') {
-      filtered = filtered.filter(t => t.status === statusFilter);
+    const totalHours = getTotalHours();
+    if (totalHours > 60) {
+      setError('Total hours cannot exceed 60 per week');
+      return false;
     }
 
-    // Date filter
-    if (dateFilter) {
-      const filterDate = new Date(dateFilter);
-      filtered = filtered.filter(t => {
-        const weekStart = new Date(t.weekStart);
-        return weekStart >= filterDate;
-      });
+    // Per-day limit across all lines: 10 hours
+    const days: Array<keyof Pick<TimesheetLine, 'sat'|'sun'|'mon'|'tue'|'wed'|'thu'|'fri'>> = ['sat','sun','mon','tue','wed','thu','fri'];
+    for (const day of days) {
+      const total = getDayTotal(day);
+      if (total > 10) {
+        setError(`Total hours for ${day.toUpperCase()} cannot exceed 10`);
+        return false;
+      }
     }
 
-    setFilteredTimesheets(filtered);
+    return true;
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'Pending':
-        return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800"><Clock className="w-3 h-3 mr-1" />Pending</Badge>;
-      case 'Submitted':
-        return <Badge variant="secondary" className="bg-blue-100 text-blue-800"><Calendar className="w-3 h-3 mr-1" />Submitted</Badge>;
-      case 'Approved':
-        return <Badge variant="secondary" className="bg-green-100 text-green-800"><CheckCircle className="w-3 h-3 mr-1" />Approved</Badge>;
-      case 'Rejected':
-        return <Badge variant="secondary" className="bg-red-100 text-red-800"><XCircle className="w-3 h-3 mr-1" />Rejected</Badge>;
-      default:
-        return <Badge variant="outline">{status}</Badge>;
+  // Pure validation utility for render-time checks (no state updates)
+  const isFormValid = () => {
+    if (lines.length === 0) return false;
+    for (const line of lines) {
+      if (!line.projectId) return false;
     }
+    const totalHours = getTotalHours();
+    if (totalHours > 60) return false;
+    return true;
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-      month: 'short', 
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
+  const handleSave = async () => {
+    if (!validateForm()) return;
 
-  const formatWeekRange = (start: string, end: string) => {
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    return `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  };
-
-  const handleView = (timesheet: Timesheet) => {
-    router.push(`/timesheets/${timesheet._id}`);
-  };
-
-  const handleLogout = async () => {
+    setIsSaving(true);
+    setError('');
+    setSuccess('');
+    
     try {
-      const response = await fetch('/api/logout', {
+      const weekDates = getWeekDates(selectedWeek);
+      const response = await fetch('/api/timesheets', {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          header: {
+            weekStart: weekDates.start,
+            weekEnd: weekDates.end,
+          },
+          lines,
+          action: 'save',
+        }),
       });
 
       if (response.ok) {
-        router.push('/login');
+        setSuccess('Timesheet saved successfully');
+        setTimeout(() => {
+          router.push('/timesheets');
+        }, 1500);
+      } else {
+        const data = await response.json();
+        setError(data.error || 'Failed to save timesheet');
       }
     } catch (error) {
-      console.error('Logout failed:', error);
+      setError('Failed to save timesheet');
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const exportToExcel = () => {
-    // Create CSV content
-    const headers = ['Employee', 'Email', 'Week Range', 'Total Hours', 'Status', 'Submitted On', 'PM Decision', 'FM Decision', 'Projects'];
-    const csvContent = [
-      headers.join(','),
-      ...filteredTimesheets.map(t => [
-        t.employeeId?.name || 'Unknown',
-        t.employeeId?.email || 'Unknown',
-        formatWeekRange(t.weekStart, t.weekEnd),
-        t.totalHours,
-        t.status,
-        t.submittedOn ? formatDate(t.submittedOn) : '',
-        t.pmDecision || '',
-        t.fmDecision || '',
-        t.lines ? t.lines.map(l => `${l.projectId?.code || 'Unknown'}:${l.hours}h`).join('; ') : ''
-      ].join(','))
-    ].join('\n');
+  const handleSubmit = async () => {
+    if (!validateForm()) return;
 
-    // Download file
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `timesheet-approvals-${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-
-    toast({
-      title: 'Export Successful',
-      description: 'Timesheet data exported to CSV',
-    });
-  };
-
-  const exportToPDF = () => {
+    setIsSubmitting(true);
+    setError('');
+    setSuccess('');
+    
     try {
-      // Import jsPDF dynamically to avoid SSR issues
-      import('jspdf').then(({ default: jsPDF }) => {
-        const doc = new jsPDF();
-        
-        // Add title
-        doc.setFontSize(20);
-        doc.text('Timesheet Approvals Report', 20, 20);
-        
-        // Add date
-        doc.setFontSize(12);
-        doc.text(`Generated on: ${new Date().toLocaleDateString()}`, 20, 35);
-        
-        // Add summary
-        doc.setFontSize(14);
-        doc.text('Summary', 20, 50);
-        doc.setFontSize(10);
-        doc.text(`Total Timesheets: ${filteredTimesheets.length}`, 20, 60);
-        doc.text(`Pending: ${filteredTimesheets.filter(t => t.status === 'Pending').length}`, 20, 70);
-        doc.text(`Submitted: ${filteredTimesheets.filter(t => t.status === 'Submitted').length}`, 20, 80);
-        doc.text(`Approved: ${filteredTimesheets.filter(t => t.status === 'Approved').length}`, 20, 90);
-        doc.text(`Rejected: ${filteredTimesheets.filter(t => t.status === 'Rejected').length}`, 20, 100);
-        
-        // Add timesheet details
-        let yPosition = 120;
-        filteredTimesheets.forEach((timesheet, index) => {
-          if (yPosition > 250) {
-            doc.addPage();
-            yPosition = 20;
-          }
-          
-          doc.setFontSize(12);
-          doc.text(`${index + 1}. ${timesheet.employeeId?.name || 'Unknown'} - ${formatWeekRange(timesheet.weekStart, timesheet.weekEnd)}`, 20, yPosition);
-          yPosition += 10;
-          
-          doc.setFontSize(10);
-          doc.text(`Status: ${timesheet.status}`, 30, yPosition);
-          yPosition += 7;
-          doc.text(`Total Hours: ${timesheet.totalHours}`, 30, yPosition);
-          yPosition += 7;
-          doc.text(`Submitted: ${timesheet.submittedOn ? formatDate(timesheet.submittedOn) : 'N/A'}`, 30, yPosition);
-          yPosition += 7;
-          
-          if (timesheet.pmDecision) {
-            doc.text(`PM Decision: ${timesheet.pmDecision}`, 30, yPosition);
-            yPosition += 7;
-          }
-          if (timesheet.fmDecision) {
-            doc.text(`FM Decision: ${timesheet.fmDecision}`, 30, yPosition);
-            yPosition += 7;
-          }
-          
-          yPosition += 10;
-        });
-        
-        // Save the PDF
-        doc.save(`timesheet-approvals-${new Date().toISOString().split('T')[0]}.pdf`);
-        
-        toast({
-          title: 'PDF Export Successful',
-          description: 'Timesheet data exported to PDF',
-        });
+      const weekDates = getWeekDates(selectedWeek);
+      const response = await fetch('/api/timesheets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          header: {
+            weekStart: weekDates.start,
+            weekEnd: weekDates.end,
+          },
+          lines,
+          action: 'submit',
+        }),
       });
+
+      if (response.ok) {
+        setSuccess('Timesheet submitted successfully');
+        setTimeout(() => {
+          router.push('/timesheets');
+        }, 1500);
+      } else {
+        const data = await response.json();
+        setError(data.error || 'Failed to submit timesheet');
+      }
     } catch (error) {
-      toast({
-        title: 'PDF Export Failed',
-        description: 'Failed to generate PDF. Please try again.',
-        variant: 'destructive',
-      });
+      setError('Failed to submit timesheet');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -340,275 +306,287 @@ export default function PreapprovalPage() {
     return null;
   }
 
+  const weekDates = getWeekDates(selectedWeek);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50">
       <Navigation 
         userRole={user.role} 
         userName={user.name} 
-        onLogout={handleLogout} 
+        onLogout={() => router.push('/login')} 
       />
 
-      {/* Export Buttons */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-        <div className="flex justify-end space-x-4">
-          <Button
-            onClick={exportToExcel}
-            variant="outline"
-            size="sm"
-            className="flex items-center space-x-2"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export Excel</span>
-          </Button>
-          <Button
-            onClick={exportToPDF}
-            variant="outline"
-            size="sm"
-            className="flex items-center space-x-2"
-          >
-            <FileText className="w-4 h-4" />
-            <span>Export PDF</span>
-          </Button>
+      {/* Header */}
+      <header className="bg-white/80 backdrop-blur-xl border-b border-white/30 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => router.back()}
+                className="flex items-center space-x-2 px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span>Back</span>
+              </button>
+              <div className="w-px h-6 bg-gray-300"></div>
+              <h1 className="text-xl font-bold text-gray-900">Weekly Timesheet Entry</h1>
+            </div>
+            
+            <div className="text-right">
+              <p className="text-sm font-medium text-gray-900">{user.name}</p>
+              <p className="text-xs text-gray-500 capitalize">{user.role.toLowerCase()}</p>
+            </div>
+          </div>
         </div>
-      </div>
+      </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Tabs */}
-        <div className="bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 p-6 mb-8">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="Pending">Pending</TabsTrigger>
-              <TabsTrigger value="Submitted">Submitted</TabsTrigger>
-              <TabsTrigger value="Approved">Approved</TabsTrigger>
-              <TabsTrigger value="Rejected">Rejected</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 p-6 mb-8">
-          <div className="flex items-center space-x-4 mb-4">
-            <Filter className="w-5 h-5 text-gray-600" />
-            <h3 className="text-lg font-semibold text-gray-900">Filters</h3>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">Search</label>
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                <Input
-                  placeholder="Search employee, project..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-            
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">Status</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-              >
-                <option value="All">All Statuses</option>
-                <option value="Pending">Pending</option>
-                <option value="Submitted">Submitted</option>
-                <option value="Approved">Approved</option>
-                <option value="Rejected">Rejected</option>
-              </select>
-            </div>
-            
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-2 block">From Date</label>
-              <Input
-                type="date"
-                value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
-              />
-            </div>
-            
-            <div className="flex items-end">
-              <Button
-                onClick={() => {
-                  setSearchTerm('');
-                  setStatusFilter('All');
-                  setDateFilter('');
-                }}
-                variant="outline"
-                size="sm"
-                className="flex items-center space-x-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>Clear Filters</span>
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Timesheets List */}
-        <div className="space-y-4">
-          {filteredTimesheets.length === 0 ? (
-            <div className="text-center py-12">
-              <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-2">No timesheets found</h3>
-              <p className="text-gray-500">
-                {activeTab === 'All' 
-                  ? 'No timesheets match your current filters.'
-                  : `No ${activeTab.toLowerCase()} timesheets found.`
-                }
-              </p>
-            </div>
-          ) : (
-            filteredTimesheets.map((timesheet) => (
-              <motion.div
-                key={timesheet._id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 p-6 hover:shadow-lg transition-all duration-200"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-4 mb-3">
-                      <h3 className="text-lg font-semibold text-gray-900">
-                        {formatWeekRange(timesheet.weekStart, timesheet.weekEnd)}
-                      </h3>
-                      {getStatusBadge(timesheet.status)}
-                    </div>
-                    
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-gray-600 mb-4">
-                      <div className="flex items-center space-x-2">
-                        <User className="w-4 h-4" />
-                        <span className="font-medium">Employee:</span>
-                        <span className="text-gray-900">{timesheet.employeeId?.name || 'Unknown'}</span>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Clock className="w-4 h-4" />
-                        <span className="font-medium">Total Hours:</span>
-                        <span className="text-gray-900 font-semibold">{timesheet.totalHours}</span>
-                      </div>
-                      {timesheet.submittedOn && (
-                        <div className="flex items-center space-x-2">
-                          <Calendar className="w-4 h-4" />
-                          <span className="font-medium">Submitted:</span>
-                          <span className="text-gray-900">{formatDate(timesheet.submittedOn)}</span>
-                        </div>
-                      )}
-                      <div>
-                        <span className="font-medium">Status:</span>
-                        <span className="ml-2 capitalize">{timesheet.status.toLowerCase()}</span>
-                      </div>
-                    </div>
-
-                    {/* Project Details */}
-                    {timesheet.lines && timesheet.lines.length > 0 && (
-                      <div className="mb-4">
-                        <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
-                          <FolderOpen className="w-4 h-4 mr-2" />
-                          Projects
-                        </h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {timesheet.lines.map((line, index) => (
-                                                         <div key={index} className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                               <span className="font-medium">{line.projectId?.code || 'Unknown'}:</span> {line.projectId?.name || 'Unknown'} - {line.hours}h
-                             </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Approval Decisions */}
-                    {(timesheet.pmDecision || timesheet.fmDecision) && (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                        {timesheet.pmDecision && (
-                          <div className="bg-blue-50 p-3 rounded">
-                            <span className="font-medium text-blue-800">PM Decision:</span>
-                            <Badge 
-                              variant={timesheet.pmDecision === 'Approved' ? 'default' : 'destructive'}
-                              className="ml-2"
-                            >
-                              {timesheet.pmDecision}
-                            </Badge>
-                            {timesheet.pmComment && (
-                              <p className="text-blue-700 mt-1">{timesheet.pmComment}</p>
-                            )}
-                          </div>
-                        )}
-                        {timesheet.fmDecision && (
-                          <div className="bg-green-50 p-3 rounded">
-                            <span className="font-medium text-green-800">FM Decision:</span>
-                            <Badge 
-                              variant={timesheet.fmDecision === 'Approved' ? 'default' : 'destructive'}
-                              className="ml-2"
-                            >
-                              {timesheet.fmDecision}
-                            </Badge>
-                            {timesheet.fmComment && (
-                              <p className="text-green-700 mt-1">{timesheet.fmComment}</p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  
-                  <div className="flex items-center space-x-2">
-                    <Button
-                      onClick={() => handleView(timesheet)}
-                      variant="ghost"
-                      size="sm"
-                      className="flex items-center space-x-2"
-                    >
-                      <Eye className="w-4 h-4" />
-                      <span>View</span>
-                    </Button>
-                  </div>
-                </div>
-              </motion.div>
-            ))
-          )}
-        </div>
-
-        {/* Summary Stats */}
-        {filteredTimesheets.length > 0 && (
-          <div className="mt-8 bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 p-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Summary</h3>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">{filteredTimesheets.length}</div>
-                <div className="text-sm text-gray-600">Total</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-yellow-600">
-                  {filteredTimesheets.filter(t => t.status === 'Pending').length}
-                </div>
-                <div className="text-sm text-gray-600">Pending</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-600">
-                  {filteredTimesheets.filter(t => t.status === 'Submitted').length}
-                </div>
-                <div className="text-sm text-gray-600">Submitted</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">
-                  {filteredTimesheets.filter(t => t.status === 'Approved').length}
-                </div>
-                <div className="text-sm text-gray-600">Approved</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-red-600">
-                  {filteredTimesheets.filter(t => t.status === 'Rejected').length}
-                </div>
-                <div className="text-sm text-gray-600">Rejected</div>
-              </div>
-            </div>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24">
+        {/* Messages */}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+            <p className="text-red-600 text-sm font-medium">{error}</p>
           </div>
         )}
+        
+        {success && (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+            <p className="text-green-600 text-sm font-medium">{success}</p>
+          </div>
+        )}
+
+        {/* Week Selection */}
+        <div className="bg-white/60 backdrop-blur-sm rounded-xl p-6 border border-white/30 mb-8">
+          <div className="flex items-center space-x-4">
+            <Calendar className="w-6 h-6 text-blue-600" />
+            <div>
+              <label className="text-sm font-medium text-gray-700">Select Week</label>
+              <select
+                value={selectedWeek}
+                onChange={(e) => setSelectedWeek(e.target.value as 'current' | 'last')}
+                className="ml-3 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="current">Current Week</option>
+                <option value="last">Last Week</option>
+              </select>
+            </div>
+            <div className="text-sm text-gray-600">
+              {weekDates.start.toLocaleDateString()} - {weekDates.end.toLocaleDateString()}
+            </div>
+          </div>
+        </div>
+
+        {/* Timesheet Grid */}
+        <div className="bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50/80">
+                <tr>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Project</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Sat</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Sun</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Mon</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Tue</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Wed</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Thu</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Fri</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Line Total</th>
+                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Comment</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200/50">
+                {lines.map((line, index) => (
+                  <tr key={index} className="hover:bg-gray-50/50">
+                    <td className="px-4 py-3">
+                      <select
+                        value={line.projectId}
+                        onChange={(e) => updateLine(index, 'projectId', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Select Project</option>
+                        {projects.map((project) => (
+                          <option key={project._id} value={project._id}>
+                            {project.code} - {project.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="24"
+                        value={line.sat}
+                        onChange={(e) => updateLine(index, 'sat', parseInt(e.target.value) || 0)}
+                        className="w-20 px-2 py-1 text-center border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="24"
+                        value={line.sun}
+                        onChange={(e) => updateLine(index, 'sun', parseInt(e.target.value) || 0)}
+                        className="w-20 px-2 py-1 text-center border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="24"
+                        value={line.mon}
+                        onChange={(e) => updateLine(index, 'mon', parseInt(e.target.value) || 0)}
+                        className="w-20 px-2 py-1 text-center border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="24"
+                        value={line.tue}
+                        onChange={(e) => updateLine(index, 'tue', parseInt(e.target.value) || 0)}
+                        className="w-20 px-2 py-1 text-center border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="24"
+                        value={line.wed}
+                        onChange={(e) => updateLine(index, 'wed', parseInt(e.target.value) || 0)}
+                        className="w-20 px-2 py-1 text-center border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="24"
+                        value={line.thu}
+                        onChange={(e) => updateLine(index, 'thu', parseInt(e.target.value) || 0)}
+                        className="w-20 px-2 py-1 text-center border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="24"
+                        value={line.fri}
+                        onChange={(e) => updateLine(index, 'fri', parseInt(e.target.value) || 0)}
+                        className="w-20 px-2 py-1 text-center border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center font-medium text-gray-900">
+                      {line.lineTotal}
+                    </td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="text"
+                        value={line.comment || ''}
+                        onChange={(e) => updateLine(index, 'comment', e.target.value)}
+                        placeholder="Optional comment"
+                        maxLength={500}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => removeProjectRow(index)}
+                        className="text-red-600 hover:text-red-800 p-1"
+                        title="Remove row"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+
+                {/* Totals Row */}
+                <tr className="bg-blue-50/50 font-semibold">
+                  <td className="px-4 py-3 text-gray-700">Totals</td>
+                  <td className="px-4 py-3 text-center text-gray-700">{getDayTotal('sat')}</td>
+                  <td className="px-4 py-3 text-center text-gray-700">{getDayTotal('sun')}</td>
+                  <td className="px-4 py-3 text-center text-gray-700">{getDayTotal('mon')}</td>
+                  <td className="px-4 py-3 text-center text-gray-700">{getDayTotal('tue')}</td>
+                  <td className="px-4 py-3 text-center text-gray-700">{getDayTotal('wed')}</td>
+                  <td className="px-4 py-3 text-center text-gray-700">{getDayTotal('thu')}</td>
+                  <td className="px-4 py-3 text-center text-gray-700">{getDayTotal('fri')}</td>
+                  <td className="px-4 py-3 text-center text-blue-700 text-lg font-bold">
+                    {getTotalHours()}
+                  </td>
+                  <td className="px-4 py-3"></td>
+                  <td className="px-4 py-3"></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Add Project Row Button */}
+          <div className="p-4 border-t border-gray-200/50">
+            <button
+              onClick={addProjectRow}
+              disabled={lines.length >= 10}
+              className="flex items-center space-x-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Project Row</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Summary */}
+        <div className="mt-6 bg-white/60 backdrop-blur-sm rounded-xl p-6 border border-white/30">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="text-center">
+              <p className="text-sm font-medium text-gray-600">Total Hours</p>
+              <p className="text-2xl font-bold text-blue-600">{getTotalHours()}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-gray-600">Week Range</p>
+              <p className="text-lg font-medium text-gray-900">
+                {weekDates.start.toLocaleDateString()} - {weekDates.end.toLocaleDateString()}
+              </p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-gray-600">Status</p>
+              <p className="text-lg font-medium text-gray-900">Ready to Save</p>
+            </div>
+          </div>
+        </div>
       </main>
+
+      {/* Sticky Footer */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-gray-200 p-4">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <div className="text-lg font-semibold text-gray-900">
+            Grand Total: <span className="text-blue-600 text-xl">{getTotalHours()}</span> hours
+          </div>
+          <div className="flex space-x-4">
+            <button
+              onClick={handleSave}
+              disabled={isSaving || !isFormValid()}
+              className="flex items-center space-x-2 px-6 py-3 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Save className="w-4 h-4" />
+              <span>{isSaving ? 'Saving...' : 'Save (Pending)'}</span>
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={isSubmitting || !isFormValid()}
+              className="flex items-center space-x-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Send className="w-4 h-4" />
+              <span>{isSubmitting ? 'Submitting...' : 'Submit (Submitted)'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

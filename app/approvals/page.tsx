@@ -30,7 +30,7 @@ interface Timesheet {
   _id: string;
   weekStart: string;
   weekEnd: string;
-  status: 'Pending' | 'Submitted' | 'Approved' | 'Rejected';
+  status: 'Pending' | 'Submitted' | 'PM_Approved' | 'Approved' | 'Rejected';
   totalHours: number;
   submittedOn?: string;
   employeeId: {
@@ -237,6 +237,8 @@ export default function ApprovalsPage() {
         return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">Pending</Badge>;
       case 'Submitted':
         return <Badge variant="secondary" className="bg-blue-100 text-blue-800">Submitted</Badge>;
+      case 'PM_Approved':
+        return <Badge variant="secondary" className="bg-orange-100 text-orange-800">PM Approved</Badge>;
       case 'Approved':
         return <Badge variant="secondary" className="bg-green-100 text-green-800">Approved</Badge>;
       case 'Rejected':
@@ -317,9 +319,10 @@ export default function ApprovalsPage() {
         {/* Tabs */}
         <div className="bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 p-6 mb-8">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="All">All</TabsTrigger>
-              <TabsTrigger value="Pending">Pending</TabsTrigger>
+              <TabsTrigger value="Submitted">Submitted</TabsTrigger>
+              <TabsTrigger value="PM_Approved">PM Approved</TabsTrigger>
               <TabsTrigger value="Approved">Approved</TabsTrigger>
               <TabsTrigger value="Rejected">Rejected</TabsTrigger>
           </TabsList>
@@ -356,7 +359,8 @@ export default function ApprovalsPage() {
                               </div>
                   
                           <div className="flex items-center space-x-2">
-                    {timesheet.status === 'Submitted' && (
+                    {/* Show approve/reject buttons based on status and user role */}
+                    {timesheet.status === 'Submitted' && user.role === 'PM' && (
                       <>
                         <Button
                           onClick={() => handleApprove(timesheet._id)}
@@ -366,7 +370,7 @@ export default function ApprovalsPage() {
                           className="flex items-center space-x-2 text-green-600 border-green-600 hover:bg-green-50"
                         >
                           <CheckCircle className="w-4 h-4" />
-                          <span>Approve</span>
+                          <span>PM Approve</span>
                         </Button>
                         <Button
                           onClick={() => {
@@ -379,7 +383,35 @@ export default function ApprovalsPage() {
                           className="flex items-center space-x-2 text-red-600 border-red-600 hover:bg-red-50"
                         >
                           <XCircle className="w-4 h-4" />
-                          <span>Reject</span>
+                          <span>PM Reject</span>
+                        </Button>
+                      </>
+                    )}
+                    
+                    {timesheet.status === 'PM_Approved' && user.role === 'FM' && (
+                      <>
+                        <Button
+                          onClick={() => handleApprove(timesheet._id)}
+                          disabled={isProcessing}
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center space-x-2 text-green-600 border-green-600 hover:bg-green-50"
+                        >
+                          <CheckCircle className="w-4 h-4" />
+                          <span>FM Approve</span>
+                        </Button>
+                        <Button
+                          onClick={() => {
+                            setSelectedTimesheet(timesheet);
+                            setShowRejectModal(true);
+                          }}
+                          disabled={isProcessing}
+                          variant="outline"
+                          size="sm"
+                          className="flex items-center space-x-2 text-red-600 border-red-600 hover:bg-red-50"
+                        >
+                          <XCircle className="w-4 h-4" />
+                          <span>FM Reject</span>
                         </Button>
                       </>
                     )}
@@ -455,7 +487,7 @@ export default function ApprovalsPage() {
         {filteredTimesheets.length > 0 && (
           <div className="mt-8 bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">Summary</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-6">
               <div className="text-center">
                 <div className="text-2xl font-bold text-blue-600">{filteredTimesheets.length}</div>
                 <div className="text-sm text-gray-600">Total Timesheets</div>
@@ -464,7 +496,13 @@ export default function ApprovalsPage() {
                 <div className="text-2xl font-bold text-yellow-600">
                   {filteredTimesheets.filter(t => t.status === 'Submitted').length}
                 </div>
-                <div className="text-sm text-gray-600">Pending Approval</div>
+                <div className="text-sm text-gray-600">Waiting for PM</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-orange-600">
+                  {filteredTimesheets.filter(t => t.status === 'PM_Approved').length}
+                </div>
+                <div className="text-sm text-gray-600">Waiting for FM</div>
               </div>
               <div className="text-center">
                 <div className="text-2xl font-bold text-green-600">

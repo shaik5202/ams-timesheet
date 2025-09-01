@@ -3,6 +3,8 @@ import connectDB from '../../../../lib/mongodb';
 import TimesheetHeader from '../../../../models/TimesheetHeader';
 import TimesheetHistory from '../../../../models/TimesheetHistory';
 import User from '../../../../models/User';
+import Project from '../../../../models/Project';
+import TimesheetLine from '../../../../models/TimesheetLine';
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,25 +46,43 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if timesheet is in submitted status
-    if (timesheet.status !== 'Submitted') {
+    // Check if timesheet is in correct status for approval
+    if (userRole === 'PM' && timesheet.status !== 'Submitted') {
       return NextResponse.json(
-        { error: 'Only submitted timesheets can be approved/rejected' },
+        { error: 'Only submitted timesheets can be approved by PM' },
+        { status: 400 }
+      );
+    }
+    
+    if (userRole === 'FM' && timesheet.status !== 'PM_Approved') {
+      return NextResponse.json(
+        { error: 'Only PM-approved timesheets can be approved by FM' },
         { status: 400 }
       );
     }
 
     // Check access based on role
     let hasAccess = false;
+    let approvalStep = '';
+
     if (userRole === 'ADMIN') {
       hasAccess = true;
+      approvalStep = 'ADMIN_OVERRIDE';
     } else if (userRole === 'PM') {
       // Check if PM manages any projects in this timesheet
-      // This would need to be implemented based on project relationships
-      hasAccess = true; // Simplified for now
+      const timesheetLines = await TimesheetLine.find({ headerId: timesheetId });
+      const projectIds = timesheetLines.map(line => line.projectId);
+      const managedProjects = await Project.find({ 
+        projectManagerId: userId,
+        _id: { $in: projectIds }
+      });
+      hasAccess = managedProjects.length > 0;
+      approvalStep = 'PM_APPROVAL';
     } else if (userRole === 'FM') {
       // Check if FM is the functional manager of the employee
-      hasAccess = timesheet.fmId?.toString() === userId;
+      hasAccess = timesheet.fmId?.toString() === userId || 
+                  timesheet.employeeId.toString() === userId; // Allow FM to approve their own reports
+      approvalStep = 'FM_APPROVAL';
     }
 
     if (!hasAccess) {
@@ -72,33 +92,56 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Update timesheet status
+    // Update timesheet based on approval step
     if (userRole === 'PM') {
+      // PM approval step
+      if (timesheet.pmDecision) {
+        return NextResponse.json(
+          { error: 'PM decision already made for this timesheet' },
+          { status: 400 }
+        );
+      }
+
       timesheet.pmDecision = decision;
       timesheet.pmComment = comment;
       timesheet.pmId = userId;
       
-      // If both PM and FM have made decisions, update overall status
-      if (timesheet.fmDecision) {
-        if (timesheet.pmDecision === 'Approved' && timesheet.fmDecision === 'Approved') {
-          timesheet.status = 'Approved';
-        } else {
-          timesheet.status = 'Rejected';
-        }
+      // If PM rejects, timesheet is immediately rejected
+      if (decision === 'Rejected') {
+        timesheet.status = 'Rejected';
       }
+      // If PM approves, status changes to 'PM_Approved' until FM approves
+      if (decision === 'Approved') {
+        timesheet.status = 'PM_Approved';
+      }
+      
     } else if (userRole === 'FM') {
+      // FM approval step - can only happen after PM approval
+      if (!timesheet.pmDecision) {
+        return NextResponse.json(
+          { error: 'PM must approve before FM can approve' },
+          { status: 400 }
+        );
+      }
+
+      if (timesheet.fmDecision) {
+        return NextResponse.json(
+          { error: 'FM decision already made for this timesheet' },
+          { status: 400 }
+        );
+      }
+
       timesheet.fmDecision = decision;
       timesheet.fmComment = comment;
       timesheet.fmId = userId;
       
-      // If both PM and FM have made decisions, update overall status
-      if (timesheet.pmDecision) {
-        if (timesheet.pmDecision === 'Approved' && timesheet.fmDecision === 'Approved') {
-          timesheet.status = 'Approved';
-        } else {
-          timesheet.status = 'Rejected';
-        }
+      // Now both PM and FM have made decisions
+      if (timesheet.pmDecision === 'Approved' && timesheet.fmDecision === 'Approved') {
+        timesheet.status = 'Approved';
+      } else {
+        timesheet.status = 'Rejected';
       }
+      
     } else if (userRole === 'ADMIN') {
       // Admin can override and set final status
       timesheet.status = decision;
@@ -121,7 +164,7 @@ export async function POST(request: NextRequest) {
     await TimesheetHistory.create({
       headerId: timesheetId,
       actorId: userId,
-      action: decision,
+      action: `${approvalStep}_${decision}`,
       comment,
       at: new Date(),
     });
@@ -129,6 +172,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       message: `Timesheet ${decision.toLowerCase()} successfully`,
       timesheet,
+      nextStep: getNextApprovalStep(timesheet, userRole),
     });
   } catch (error) {
     console.error('Approval decision error:', error);
@@ -136,6 +180,20 @@ export async function POST(request: NextRequest) {
       { error: 'Internal server error' },
       { status: 500 }
     );
+  }
+}
+
+function getNextApprovalStep(timesheet: any, currentUserRole: string): string {
+  if (timesheet.status === 'Approved') {
+    return 'COMPLETED';
+  } else if (timesheet.status === 'Rejected') {
+    return 'REJECTED';
+  } else if (timesheet.status === 'PM_Approved') {
+    return 'WAITING_FOR_FM_APPROVAL';
+  } else if (timesheet.status === 'Submitted' && !timesheet.pmDecision) {
+    return 'WAITING_FOR_PM_APPROVAL';
+  } else {
+    return 'IN_PROGRESS';
   }
 }
 
