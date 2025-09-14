@@ -87,11 +87,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate totals: max 10 per day (across all lines), max 60 per week
+    // Validate line totals: max 10 per line, max 60 per week
+    for (const line of lines) {
+      if (line.lineTotal > 10) {
+        return NextResponse.json(
+          { error: `Line total for each project cannot exceed 10 hours. Current line total: ${line.lineTotal} hours` },
+          { status: 400 }
+        );
+      }
+    }
+
     const totalHours = lines.reduce((sum: number, line: { lineTotal: number }) => sum + line.lineTotal, 0);
     if (totalHours > 60) {
       return NextResponse.json(
-        { error: 'Total hours cannot exceed 60 per week' },
+        { error: 'Grand total hours cannot exceed 60 per week' },
         { status: 400 }
       );
     }
@@ -154,6 +163,19 @@ export async function POST(request: NextRequest) {
     if (action === 'submit') {
       timesheetHeader.status = 'Submitted';
       timesheetHeader.submittedOn = new Date();
+      
+      // Assign PM and FM based on project assignments
+      // Get the first project from the lines to determine assignments
+      if (lines.length > 0 && lines[0].projectId) {
+        const Project = require('../../../models/Project').default;
+        const project = await Project.findById(lines[0].projectId);
+        if (project) {
+          timesheetHeader.pmId = project.projectManagerId;
+          if (project.functionalManagerId) {
+            timesheetHeader.fmId = project.functionalManagerId;
+          }
+        }
+      }
     }
 
     timesheetHeader.totalHours = totalHours;

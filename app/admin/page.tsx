@@ -18,6 +18,24 @@ interface User {
   createdAt?: string;
 }
 
+interface Project {
+  _id: string;
+  name: string;
+  code: string;
+  projectManagerId: {
+    _id: string;
+    name: string;
+    email: string;
+  };
+  functionalManagerId?: {
+    _id: string;
+    name: string;
+    email: string;
+  };
+  active: boolean;
+  createdAt?: string;
+}
+
 interface Timesheet {
   _id: string;
   weekStart: string;
@@ -58,6 +76,7 @@ interface Timesheet {
 export default function AdminPage() {
   const router = useRouter();
   const [users, setUsers] = useState<User[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [timesheets, setTimesheets] = useState<Timesheet[]>([]);
   const [filteredTimesheets, setFilteredTimesheets] = useState<Timesheet[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,6 +86,12 @@ export default function AdminPage() {
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ name: string; role: User['role']; password: string }>({ name: '', role: 'EMPLOYEE', password: '' });
+  
+  // Project management state
+  const [projectForm, setProjectForm] = useState({ name: '', code: '', projectManagerId: '', functionalManagerId: '' });
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+  const [editProjectForm, setEditProjectForm] = useState<{ projectManagerId: string; functionalManagerId: string }>({ projectManagerId: '', functionalManagerId: '' });
   
   // Timesheet filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -138,6 +163,18 @@ export default function AdminPage() {
     setFilteredTimesheets(filtered);
   }, [timesheets, searchTerm, statusFilter, dateFilter, employeeFilter]);
 
+  const fetchProjects = useCallback(async () => {
+    try {
+      const res = await fetch('/api/projects');
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(data.projects);
+      }
+    } catch (error) {
+      console.error('Failed to fetch projects:', error);
+    }
+  }, []);
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -160,6 +197,12 @@ export default function AdminPage() {
     };
     load();
   }, [router]);
+
+  useEffect(() => {
+    if (activeTab === 'projects') {
+      fetchProjects();
+    }
+  }, [activeTab, fetchProjects]);
 
   useEffect(() => {
     if (activeTab === 'approvals') {
@@ -240,6 +283,81 @@ export default function AdminPage() {
       setUsers((prev) => prev.filter((x) => x._id !== id));
     } catch {
       setError('Failed to delete user');
+    }
+  };
+
+  // Project management functions
+  const createProject = async () => {
+    if (!projectForm.name || !projectForm.code || !projectForm.projectManagerId) {
+      setError('Please fill all required fields');
+      return;
+    }
+    setCreatingProject(true);
+    setError('');
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: projectForm.name,
+          code: projectForm.code,
+          projectManagerId: projectForm.projectManagerId,
+          functionalManagerId: projectForm.functionalManagerId || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Failed to create project');
+        return;
+      }
+      setProjects((prev) => [data.project, ...prev]);
+      setProjectForm({ name: '', code: '', projectManagerId: '', functionalManagerId: '' });
+      toast({
+        title: 'Success',
+        description: 'Project created successfully',
+      });
+    } catch {
+      setError('Failed to create project');
+    } finally {
+      setCreatingProject(false);
+    }
+  };
+
+  const beginEditProject = (project: Project) => {
+    setEditingProjectId(project._id);
+    setEditProjectForm({
+      projectManagerId: project.projectManagerId._id,
+      functionalManagerId: project.functionalManagerId?._id || '',
+    });
+  };
+
+  const saveEditProject = async () => {
+    if (!editingProjectId) return;
+    setError('');
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: editingProjectId,
+          projectManagerId: editProjectForm.projectManagerId,
+          functionalManagerId: editProjectForm.functionalManagerId || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Failed to update project');
+        return;
+      }
+      setProjects((prev) => prev.map((x) => (x._id === data.project._id ? data.project : x)));
+      setEditingProjectId(null);
+      setEditProjectForm({ projectManagerId: '', functionalManagerId: '' });
+      toast({
+        title: 'Success',
+        description: 'Project updated successfully',
+      });
+    } catch {
+      setError('Failed to update project');
     }
   };
 
@@ -420,8 +538,9 @@ export default function AdminPage() {
         {/* Tabs */}
         <div className="bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 p-6 mb-8">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="users">User Management</TabsTrigger>
+              <TabsTrigger value="projects">Project Management</TabsTrigger>
               <TabsTrigger value="approvals">Approval History</TabsTrigger>
             </TabsList>
           </Tabs>
@@ -515,6 +634,157 @@ export default function AdminPage() {
                               <button onClick={() => beginEdit(u)} className="px-3 py-1 border rounded">Edit</button>
                               <button onClick={() => deleteUser(u._id)} className="px-3 py-1 border rounded text-red-600">Delete</button>
                             </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'projects' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-1 bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center"><FolderOpen className="w-5 h-5 mr-2" />Create Project</h2>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Project Name</label>
+                  <input 
+                    value={projectForm.name} 
+                    onChange={(e) => setProjectForm({ ...projectForm, name: e.target.value })} 
+                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md" 
+                    placeholder="Project Alpha" 
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Project Code</label>
+                  <input 
+                    value={projectForm.code} 
+                    onChange={(e) => setProjectForm({ ...projectForm, code: e.target.value.toUpperCase() })} 
+                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md" 
+                    placeholder="PA001" 
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Project Manager *</label>
+                  <select 
+                    value={projectForm.projectManagerId} 
+                    onChange={(e) => setProjectForm({ ...projectForm, projectManagerId: e.target.value })} 
+                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="">Select PM</option>
+                    {users.filter(u => u.role === 'PM').map(u => (
+                      <option key={u._id} value={u._id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Functional Manager</label>
+                  <select 
+                    value={projectForm.functionalManagerId} 
+                    onChange={(e) => setProjectForm({ ...projectForm, functionalManagerId: e.target.value })} 
+                    className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="">Select FM (Optional)</option>
+                    {users.filter(u => u.role === 'FM').map(u => (
+                      <option key={u._id} value={u._id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <button 
+                  onClick={createProject} 
+                  disabled={creatingProject} 
+                  className="w-full h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-md"
+                >
+                  {creatingProject ? 'Creating...' : 'Create Project'}
+                </button>
+              </div>
+            </div>
+
+            <div className="lg:col-span-2 bg-white/60 backdrop-blur-sm rounded-xl border border-white/30 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">All Projects</h2>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50/80">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Name</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Code</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">PM</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">FM</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Status</th>
+                      <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200/50">
+                    {projects.map((project) => (
+                      <tr key={project._id}>
+                        <td className="px-4 py-3 text-sm text-gray-900">{project.name}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900 font-mono">{project.code}</td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {editingProjectId === project._id ? (
+                            <select 
+                              value={editProjectForm.projectManagerId} 
+                              onChange={(e) => setEditProjectForm({ ...editProjectForm, projectManagerId: e.target.value })} 
+                              className="px-2 py-1 border border-gray-300 rounded"
+                            >
+                              {users.filter(u => u.role === 'PM').map(u => (
+                                <option key={u._id} value={u._id}>{u.name}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            project.projectManagerId.name
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          {editingProjectId === project._id ? (
+                            <select 
+                              value={editProjectForm.functionalManagerId} 
+                              onChange={(e) => setEditProjectForm({ ...editProjectForm, functionalManagerId: e.target.value })} 
+                              className="px-2 py-1 border border-gray-300 rounded"
+                            >
+                              <option value="">No FM</option>
+                              {users.filter(u => u.role === 'FM').map(u => (
+                                <option key={u._id} value={u._id}>{u.name}</option>
+                              ))}
+                            </select>
+                          ) : (
+                            project.functionalManagerId?.name || 'Not assigned'
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900">
+                          <Badge variant={project.active ? 'default' : 'secondary'}>
+                            {project.active ? 'Active' : 'Inactive'}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-900 space-x-2">
+                          {editingProjectId === project._id ? (
+                            <>
+                              <button 
+                                onClick={saveEditProject} 
+                                className="px-3 py-1 bg-blue-600 text-white rounded"
+                              >
+                                Save
+                              </button>
+                              <button 
+                                onClick={() => { 
+                                  setEditingProjectId(null); 
+                                  setEditProjectForm({ projectManagerId: '', functionalManagerId: '' }); 
+                                }} 
+                                className="px-3 py-1 border rounded"
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <button 
+                              onClick={() => beginEditProject(project)} 
+                              className="px-3 py-1 border rounded"
+                            >
+                              Edit Assignments
+                            </button>
                           )}
                         </td>
                       </tr>

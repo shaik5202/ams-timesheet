@@ -4,6 +4,7 @@ export interface IProject extends Document {
   name: string;
   code: string;
   projectManagerId: mongoose.Types.ObjectId;
+  functionalManagerId?: mongoose.Types.ObjectId;
   active: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -26,6 +27,10 @@ const ProjectSchema = new Schema<IProject>({
     type: Schema.Types.ObjectId,
     ref: 'User',
     required: true,
+  },
+  functionalManagerId: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
   },
   active: {
     type: Boolean,

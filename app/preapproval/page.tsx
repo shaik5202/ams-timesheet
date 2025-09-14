@@ -70,17 +70,17 @@ export default function PreapprovalPage() {
       }
     };
 
-    const fetchProjects = async () => {
-      try {
-        const response = await fetch('/api/projects');
-        if (response.ok) {
-          const data = await response.json();
-          setProjects(data.projects);
-        }
-      } catch (error) {
-        console.error('Failed to fetch projects:', error);
+  const fetchProjects = async () => {
+    try {
+      const response = await fetch('/api/projects?type=preapproval');
+      if (response.ok) {
+        const data = await response.json();
+        setProjects(data.projects);
       }
-    };
+    } catch (error) {
+      console.error('Failed to fetch projects:', error);
+    }
+  };
 
     checkAuth();
     fetchProjects();
@@ -179,11 +179,17 @@ export default function PreapprovalPage() {
         setError('All projects must be selected');
         return false;
       }
+      
+      // Check line total (individual project line)
+      if (line.lineTotal > 10) {
+        setError(`Line total for each project cannot exceed 10 hours. Current line total: ${line.lineTotal} hours`);
+        return false;
+      }
     }
 
     const totalHours = getTotalHours();
     if (totalHours > 60) {
-      setError('Total hours cannot exceed 60 per week');
+      setError('Grand total hours cannot exceed 60 per week');
       return false;
     }
 
@@ -205,6 +211,8 @@ export default function PreapprovalPage() {
     if (lines.length === 0) return false;
     for (const line of lines) {
       if (!line.projectId) return false;
+      // Check line total (individual project line)
+      if (line.lineTotal > 10) return false;
     }
     const totalHours = getTotalHours();
     if (totalHours > 60) return false;
@@ -329,7 +337,7 @@ export default function PreapprovalPage() {
                 <span>Back</span>
               </button>
               <div className="w-px h-6 bg-gray-300"></div>
-              <h1 className="text-xl font-bold text-gray-900">Weekly Timesheet Entry</h1>
+              <h1 className="text-xl font-bold text-gray-900">Pre-Approval Timesheet Entry</h1>
             </div>
             
             <div className="text-right">
@@ -374,6 +382,11 @@ export default function PreapprovalPage() {
               {weekDates.start.toLocaleDateString()} - {weekDates.end.toLocaleDateString()}
             </div>
           </div>
+          <div className="mt-3 p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-800">
+              <strong>Pre-Approval Mode:</strong> This timesheet will be routed to the assigned Project Manager and Functional Manager based on the selected projects.
+            </p>
+          </div>
         </div>
 
         {/* Timesheet Grid */}
@@ -390,7 +403,10 @@ export default function PreapprovalPage() {
                   <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Wed</th>
                   <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Thu</th>
                   <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Fri</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Line Total</th>
+                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">
+                    Line Total
+                    <div className="text-xs text-gray-500 font-normal">(Max: 10)</div>
+                  </th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-gray-700">Comment</th>
                   <th className="px-4 py-3 text-center text-sm font-medium text-gray-700">Actions</th>
                 </tr>
@@ -482,8 +498,13 @@ export default function PreapprovalPage() {
                         className="w-20 px-2 py-1 text-center border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     </td>
-                    <td className="px-4 py-3 text-center font-medium text-gray-900">
-                      {line.lineTotal}
+                    <td className="px-4 py-3 text-center font-medium">
+                      <span className={line.lineTotal > 10 ? 'text-red-600 font-bold' : 'text-gray-900'}>
+                        {line.lineTotal}
+                      </span>
+                      {line.lineTotal > 10 && (
+                        <div className="text-xs text-red-500 mt-1">Max: 10</div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <input
@@ -545,7 +566,10 @@ export default function PreapprovalPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="text-center">
               <p className="text-sm font-medium text-gray-600">Total Hours</p>
-              <p className="text-2xl font-bold text-blue-600">{getTotalHours()}</p>
+              <p className={`text-2xl font-bold ${getTotalHours() > 60 ? 'text-red-600' : 'text-blue-600'}`}>
+                {getTotalHours()}/60
+              </p>
+              <p className="text-xs text-gray-500">Max: 60 per week</p>
             </div>
             <div className="text-center">
               <p className="text-sm font-medium text-gray-600">Week Range</p>
@@ -554,8 +578,9 @@ export default function PreapprovalPage() {
               </p>
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium text-gray-600">Status</p>
-              <p className="text-lg font-medium text-gray-900">Ready to Save</p>
+              <p className="text-sm font-medium text-gray-600">Line Limits</p>
+              <p className="text-lg font-medium text-gray-900">Max: 10 per line</p>
+              <p className="text-xs text-gray-500">Per project</p>
             </div>
           </div>
         </div>
@@ -565,7 +590,8 @@ export default function PreapprovalPage() {
       <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-gray-200 p-4">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <div className="text-lg font-semibold text-gray-900">
-            Grand Total: <span className="text-blue-600 text-xl">{getTotalHours()}</span> hours
+            Grand Total: <span className={`text-xl ${getTotalHours() > 60 ? 'text-red-600' : 'text-blue-600'}`}>{getTotalHours()}</span>/60 hours
+            <span className="text-sm text-gray-500 ml-2">(Max: 10 per line, 60 per week)</span>
           </div>
           <div className="flex space-x-4">
             <button
